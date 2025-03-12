@@ -9,7 +9,11 @@ from typing import TYPE_CHECKING, Optional, TypedDict, Union
 
 import numpy as np
 import torch
-from transformers.image_utils import get_image_size, to_numpy_array
+from transformers.image_utils import (
+    get_image_size, 
+    to_numpy_array,
+    make_nested_list_of_images,
+)
 from typing_extensions import override
 
 from ..extras.constants import AUDIO_PLACEHOLDER, IGNORE_INDEX, IMAGE_PLACEHOLDER, VIDEO_PLACEHOLDER
@@ -317,6 +321,55 @@ class BasePlugin(MMPluginMixin):
         self._validate_input(processor, images, videos, audios)
         return {}
 
+@dataclass
+class Gemma3Plugin(BasePlugin):
+    @override
+    def process_messages(
+        self,
+        messages: Sequence[dict[str, str]],
+        images: Sequence["ImageInput"],
+        videos: Sequence["VideoInput"],
+        audios: Sequence["AudioInput"],
+        processor: Optional["ProcessorMixin"],
+    ) -> list[dict[str, str]]:
+        self._validate_input(processor, images, videos, audios)
+        num_image_tokens = 0
+        image_seqlen = getattr(processor, "image_seq_length") if self.full_image_sequence else 1
+        full_image_expanded_sequence = getattr(processor, "full_image_sequence")
+        
+        messages = deepcopy(messages)
+        for message in messages:
+            content = message["content"]
+            while IMAGE_PLACEHOLDER in content:
+                content = content.replace(IMAGE_PLACEHOLDER, "{{image}}" * image_seqlen, 1)
+                num_image_tokens += 1
+
+            message["content"] = content.replace("{{image}}", self.image_token)
+
+        if len(images) != num_image_tokens:
+            raise ValueError(f"The number of images does not match the number of {IMAGE_PLACEHOLDER} tokens.")
+
+        return messages
+    
+    @override
+    def _get_mm_inputs(
+        self,
+        images: Sequence["ImageInput"],
+        videos: Sequence["VideoInput"],
+        audios: Sequence["AudioInput"],
+        processor: "ProcessorMixin",
+        **kwargs, # need Gemma3ProssorKwargs?
+    ) -> dict[str, "torch.Tensor"]:
+        image_processor: "BaseImageProcessor" = getattr(processor, "image_processor")
+        mm_inputs = {}
+        
+        if len(images) > 0:
+            batched_images = make_nested_list_of_images(images)
+            images_inputs = processor(batched_images) # need extra kwargs?
+        
+
+
+        return mm_inputs
 
 @dataclass
 class LlavaPlugin(BasePlugin):
