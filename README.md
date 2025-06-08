@@ -284,7 +284,7 @@ Choose your path:
 | [MiniCPM-o-2.6/MiniCPM-V-2.6](https://huggingface.co/openbmb)     | 8B                               | minicpm_o/minicpm_v |
 | [Ministral/Mistral-Nemo](https://huggingface.co/mistralai)        | 8B/12B                           | ministral           |
 | [Mistral/Mixtral](https://huggingface.co/mistralai)               | 7B/8x7B/8x22B                    | mistral             |
-| [Mistral Small](https://huggingface.co/mistralai)                 | 24B                              | mistral_small       |
+| [Mistral Small](https://huggingface.co/mistralai)                 | 24B                              | mistral_small/mistral_small_vl       |
 | [OLMo](https://huggingface.co/allenai)                            | 1B/7B                            | -                   |
 | [PaliGemma/PaliGemma2](https://huggingface.co/google)             | 3B/10B/28B                       | paligemma           |
 | [Phi-1.5/Phi-2](https://huggingface.co/microsoft)                 | 1.3B/2.7B                        | -                   |
