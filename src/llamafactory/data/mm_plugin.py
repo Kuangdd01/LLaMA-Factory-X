@@ -656,16 +656,19 @@ class InternVLPlugin(BasePlugin):
                 num_image_tokens += 1
 
             while VIDEO_PLACEHOLDER in content:
-                current_patch_index = video_patch_indices[num_video_tokens - 1] if num_video_tokens > 0 else 0
-                end_patch_index = video_patch_indices[num_video_tokens]
-                num_patches = list(video_num_patches[current_patch_index:end_patch_index])
-                video_replaced_prompt = "\n".join(
-                    f"Frame{i + 1}: <img>{'<IMG_CONTEXT>' * image_seqlen * num_patches[i]}</img>"
-                    for i in range(len(num_patches))
-                )
-                content = content.replace(VIDEO_PLACEHOLDER, video_replaced_prompt, 1)
-                num_video_tokens += 1
-
+                if self.expand_mm_tokens:
+                    current_patch_index = video_patch_indices[num_video_tokens - 1] if num_video_tokens > 0 else 0
+                    end_patch_index = video_patch_indices[num_video_tokens]
+                    num_patches = list(video_num_patches[current_patch_index:end_patch_index])
+                    video_replaced_prompt = "\n".join(
+                        f"Frame{i + 1}: <img>{'<IMG_CONTEXT>' * image_seqlen * num_patches[i]}</img>"
+                        for i in range(len(num_patches))
+                    )
+                    content = content.replace(VIDEO_PLACEHOLDER, video_replaced_prompt, 1)
+                    num_video_tokens += 1
+                else:
+                    content = content.replace(VIDEO_PLACEHOLDER, "<video>") # avoid use other placeholder
+                    break # do nothing if not expand video tokens # vllm use `<video>` as placeholder
             message["content"] = content
 
         return messages
