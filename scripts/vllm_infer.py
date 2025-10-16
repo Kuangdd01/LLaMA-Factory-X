@@ -148,14 +148,21 @@ def vllm_infer(
                 }
             elif batch["videos"][j] is not None:
                 video = batch["videos"][j]
+                video_metadata = {}
+                if "qwen3_vl" in template:
+                    video_metadata = {
+                        "fps": getattr(tokenizer_module["processor"], "video_fps", 24.0),
+                        "duration": len(video),
+                        "total_num_frames": len(video)
+                    }
                 multi_modal_data = {
-                    "video": template_obj.mm_plugin._regularize_videos(
+                    "video": (template_obj.mm_plugin._regularize_videos(
                         video,
                         image_max_pixels=image_max_pixels,
                         image_min_pixels=image_min_pixels,
                         video_fps=video_fps,
                         video_maxlen=video_maxlen,
-                    )["videos"]
+                    )["videos"], video_metadata),
                 }
             elif batch["audios"][j] is not None:
                 audio = batch["audios"][j]
