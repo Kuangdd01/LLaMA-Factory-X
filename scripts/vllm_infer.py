@@ -168,7 +168,8 @@ def vllm_infer(
                 if need_video_kwargs:
                     video_metadata = {
                         "fps": getattr(tokenizer_module["processor"], "video_fps", 24.0),
-                        'do_sample_frames': False
+                        'do_sample_frames': False,
+                        "total_num_frames": len(multi_modal_data["video"][0])
                     }
             elif batch["audios"][j] is not None:
                 audio = batch["audios"][j]
