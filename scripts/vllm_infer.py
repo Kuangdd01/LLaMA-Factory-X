@@ -32,6 +32,12 @@ if is_vllm_available():
     from vllm import LLM, SamplingParams
     from vllm.lora.request import LoRARequest
 
+def _need_video_kwargs(template):
+    NEEDED_TEMPLATE = ["qwen3vl", "glm4v"]
+    if any(t in template for t in NEEDED_TEMPLATE):
+        return True
+
+    return False
 
 def vllm_infer(
     model_name_or_path: str,
@@ -132,6 +138,7 @@ def vllm_infer(
 
     # Store all results in these lists
     all_prompts, all_preds, all_labels = [], [], []
+    need_video_kwargs = _need_video_kwargs(template)
 
     # Add batch process to avoid the issue of too many files opened
     for i in tqdm(range(0, len(train_dataset), batch_size), desc="Processing batched inference"):
@@ -147,8 +154,8 @@ def vllm_infer(
                     )["images"]
                 }
             elif batch["videos"][j] is not None:
+                video_metadata = None
                 video = batch["videos"][j]
-                video_metadata = {}
                 multi_modal_data = {
                     "video": template_obj.mm_plugin._regularize_videos(
                         video,
@@ -156,16 +163,13 @@ def vllm_infer(
                         image_min_pixels=image_min_pixels,
                         video_fps=video_fps,
                         video_maxlen=video_maxlen,
-                    )["videos"],
+                    )["videos"]
                 }
-                if "qwen3_vl" in template:
+                if need_video_kwargs:
                     video_metadata = {
                         "fps": getattr(tokenizer_module["processor"], "video_fps", 24.0),
-                        "duration": len(multi_modal_data[0][0]),
-                        "total_num_frames": len(multi_modal_data[0][0])
+                        'do_sample_frames': False
                     }
-
-                multi_modal_data["video"] = (multi_modal_data["video"], video_metadata)
             elif batch["audios"][j] is not None:
                 audio = batch["audios"][j]
                 audio_data = template_obj.mm_plugin._regularize_audios(
@@ -176,7 +180,14 @@ def vllm_infer(
             else:
                 multi_modal_data = None
 
-            vllm_inputs.append({"prompt_token_ids": batch["input_ids"][j], "multi_modal_data": multi_modal_data})
+            vllm_input_data = {
+                "prompt_token_ids": batch["input_ids"][j],
+                "multi_modal_data": multi_modal_data
+            }
+            if 'video_metadata' in locals() and video_metadata is not None:
+                vllm_input_data["mm_processor_kwargs"] = video_metadata
+
+            vllm_inputs.append(vllm_input_data)
             prompts.append(tokenizer.decode(batch["input_ids"][j], skip_special_tokens=skip_special_tokens))
             labels.append(
                 tokenizer.decode(
