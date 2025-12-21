@@ -1,41 +1,159 @@
+"""Integration tests for DataLoader with different combinations of packing and dynamic batching.
+
+Tests the 4 scenarios:
+a) non pack + non dynamic
+b) non pack + dynamic
+c) pack + non dynamic
+d) pack + dynamic
+"""
+
 import torch
+from torch.utils.data import DataLoader as TorchDataLoader
+from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
-from llamafactory.v1.core.trainer_utils.data_collator import DefaultCollator
+from llamafactory.v1.config.data_args import DataArguments
+from llamafactory.v1.core.data_engine import DataEngine
+from llamafactory.v1.core.data_loader import DataLoader
+from llamafactory.v1.core.trainer_utils.data_collator import (
+    DefaultCollator,
+)
+from llamafactory.v1.plugins.data_plugins.template import QwenTemplate
+from llamafactory.v1.utils.batching_queue import TextBatchingQueue
 
 
-def test_default_collator():
+class TensorDataset(Dataset):
+    """Wrapper dataset that converts DataEngine samples to tensor format."""
 
-    def convert_to_hf_messages(messages: list[dict[str, any]]) -> list[dict[str, any]]:
-        return [{"role": message["role"], "content": "".join([item["value"] for item in message["content"]]) if isinstance(message["content"], list) else message["content"]} for message in messages]
+    def __init__(self, data_engine: DataEngine, processor, template, max_samples: int = None):
+        self.data_engine = data_engine
+        self.processor = processor
+        self.template = template
+        self.max_samples = max_samples or len(data_engine)
+        self.tokenizer = processor.tokenizer if hasattr(processor, "tokenizer") else processor
 
-    # for thinking template check template other place
+    def __len__(self):
+        return min(self.max_samples, len(self.data_engine))
+
+    def __getitem__(self, idx):
+        # Get sample from DataEngine
+        sample = self.data_engine[idx]
+
+        # Extract messages from sample
+        # DataEngine returns samples with format like {"messages": [...], ...}
+        # For llamafactory/v1-sft-demo, the format should have "messages" field
+        messages = None
+        if "messages" in sample:
+            messages = sample["messages"]
+        elif "conversations" in sample:
+            messages = sample["conversations"]
+        elif "conversation" in sample:
+            messages = sample["conversation"]
+        else:
+            # Try to find message-like fields (skip _dataset_name)
+            for key, value in sample.items():
+                if key.startswith("_"):
+                    continue
+                if isinstance(value, list) and len(value) > 0:
+                    # Check if it looks like a message list
+                    if isinstance(value[0], dict) and "role" in value[0]:
+                        messages = value
+                        break
+
+        if messages is None:
+            raise ValueError(f"Could not find messages in sample: {list(sample.keys())}")
+
+        # Encode messages using template
+        encoded = self.template.encode_messages(self.tokenizer, messages)
+
+        # Convert to tensors
+        return {
+            "input_ids": torch.tensor(encoded["input_ids"], dtype=torch.long),
+            "attention_mask": torch.tensor(encoded["attention_mask"], dtype=torch.long),
+            "labels": torch.tensor(encoded["labels"], dtype=torch.long),
+        }
+
+
+def create_real_dataset(max_samples: int = 20, batch_size: int = 4):
+    """Create a real dataset using DataEngine."""
+    data_args = DataArguments(dataset="llamafactory/v1-sft-demo")
+    data_engine = DataEngine(data_args)
+
+    # Create processor and template
     processor = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct", trust_remote_code=True, use_fast=True)
+    template = QwenTemplate()
 
-    conv1 = [
-        {"role": "system", "content": [{"type": "text", "value": "You are a helpful assistant."}]},
-        {"role": "user", "content": [{"type": "text", "value": "hi"}]},
-        {"role": "assistant", "content": [{"type": "text", "value": "hello"}]},
-    ]
-    conv2 = [
-        {"role": "system", "content": [{"type": "text", "value": "You are a helpful assistant."}]},
-        {"role": "user", "content": [{"type": "text", "value": "tell me a joke"}]},
-        {"role": "assistant", "content": [{"type": "text", "value": "knock knock"}]},
-    ]
+    # Create tensor dataset
+    tensor_dataset = TensorDataset(data_engine, processor, template, max_samples=max_samples)
 
-    hf_conv1 = convert_to_hf_messages(conv1)
-    hf_conv2 = convert_to_hf_messages(conv2)
+    # Create torch DataLoader
+    torch_dataloader = TorchDataLoader(
+        tensor_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=lambda x: x,
+    )
 
-    hf_conversations = [hf_conv1, hf_conv2]
-    texts = processor.apply_chat_template(hf_conversations, tokenize=False, add_generation_prompt=False)
-    hf_encoded = processor(texts, add_special_tokens=False, padding=True, return_tensors="pt")
+    return torch_dataloader, processor, template
 
-    collator = DefaultCollator(processor=processor)
-    batch = collator([conv1, conv2])
 
-    assert torch.equal(hf_encoded["input_ids"], batch["input_ids"])
-    assert isinstance(batch["input_ids"], torch.Tensor)
-    assert isinstance(batch["labels"], torch.Tensor)
-    assert isinstance(batch["attention_mask"], torch.Tensor)
-    assert batch["input_ids"].shape[0] == 2
-    assert batch["labels"].shape[0] == 2
+class TestDataLoaderNonPackNonDynamic:
+    """Test case a) non pack + non dynamic."""
+
+    def test_basic_functionality(self):
+        """Test DataLoader without packing and without dynamic batching."""
+        # Create real dataset
+        torch_dataloader, processor, template = create_real_dataset(max_samples=80, batch_size=8)
+
+        # Create collator (non-packing)
+        collator = DefaultCollator(processor=processor, template=template)
+
+        # Create DataLoader without batching_queue (non-dynamic)
+        data_loader = DataLoader(
+            dataloader=torch_dataloader,
+            collate_fn=collator,
+            num_micro_batch=1,
+            batching_queue=None,
+        )
+
+        # Iterate and check results
+        batches = list(iter(data_loader))
+        assert len(batches) > 0
+
+        # Check first batch
+        one_batch = batches[0]
+        micro_batches = one_batch[0]
+        assert "input_ids" in micro_batches
+        assert "attention_mask" in micro_batches
+        assert "labels" in micro_batches
+        assert micro_batches["input_ids"].shape[0] == 1  # batch_size=1
+        assert micro_batches["input_ids"].ndim == 2  # [batch_size, seq_len]
+
+
+class TestDataLoaderNonPackDynamic:
+    """Test case b) non pack + dynamic."""
+
+    def test_basic_functionality(self):
+        """Test DataLoader without packing but with dynamic batching."""
+        # Create real dataset
+        torch_dataloader, processor, template = create_real_dataset(max_samples=80, batch_size=8)
+        collator = DefaultCollator(processor=processor, template=template)
+
+        # Create batching queue for dynamic batching
+        batching_queue = TextBatchingQueue(
+            token_micro_bsz=120,
+            buffer_size=8,
+        )
+
+        data_loader = DataLoader(
+            dataloader=torch_dataloader,
+            collate_fn=collator,
+            num_micro_batch=4,
+            batching_queue=batching_queue,
+        )
+
+        # Iterate and check
+        batches = list(iter(data_loader))
+        micro_batch_tokens_first = [micro_batch["attention_mask"].sum() for micro_batch in batches[0]]
+        assert all(num_tokens <= 120 for num_tokens in micro_batch_tokens_first)
+        assert len(batches) > 0

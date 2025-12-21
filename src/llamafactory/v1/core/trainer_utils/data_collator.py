@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,7 +22,8 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data._utils.collate import default_collate
 
 from ....extras.constants import IGNORE_INDEX
-from ...plugins.data_plugins.template import QwenTemplate
+from ...plugins.data_plugins.template import Template  # FIXME
+from ...utils.seqlen_utils import len2culen
 from ...utils.types import Processor, Tensor
 
 
@@ -61,15 +63,25 @@ class DataCollator:
 class DefaultCollator(DataCollator):
     """Example for now."""
     processor: "Processor" # processor name -> map to encode_messages function
-    template: QwenTemplate = QwenTemplate()
+    template: "Template"
 
     def __call__(self, messages: list[list[dict[str, Any]]]) -> dict[str, Tensor]:
         features = []
 
-        for message in messages:
-            encoded_message = self.template.encode_messages(self.tokenizer, message)
-            encoded_message = {k: torch.tensor(v, dtype=torch.long) for k, v in encoded_message.items()}
-            features.append(encoded_message)
+        # Check if data is already tokenized (contains input_ids)
+        if messages and isinstance(messages[0], dict) and "input_ids" in messages[0]:
+            for feature in messages:
+                if not isinstance(feature, dict):
+                    raise ValueError(f"Expected dict but got {type(feature)}")
+                tensor_feature = {k: torch.tensor(v, dtype=torch.long) if not isinstance(v, torch.Tensor) else v
+                                 for k, v in feature.items()}
+                features.append(tensor_feature)
+        else:
+            # Data needs to be encoded
+            for message in messages:
+                encoded_message = self.template.encode_messages(self.tokenizer, message)
+                encoded_message = {k: torch.tensor(v, dtype=torch.long) for k, v in encoded_message.items()}
+                features.append(encoded_message)
 
         return super().__call__(features)
 
@@ -80,7 +92,21 @@ class PairwiseCollator(DataCollator):
 
 
 @dataclass
-class PackingCollator(DataCollator):
-    pass
+class DataCollatorWithPacking(DefaultCollator):
+    """Data collator with packing."""
+
+    processor: "Processor"
+    template: "Template"
+
+    def __call__(self, features: Sequence[dict[str, "torch.Tensor"]]) -> dict[str, "torch.Tensor"]:
+        seqlens = torch.tensor([len(feature["input_ids"]) for feature in features], dtype=torch.long)
+        batch = {"cu_seqlens": len2culen(seqlens)}
+        for input_name in features[0].keys():
+            if input_name in ("input_ids", "attention_mask", "labels"):
+                batch[input_name] = torch.cat([feature[input_name] for feature in features])
+            else:
+                batch[input_name] = default_collate([feature[input_name] for feature in features])
+
+        return batch
 
 

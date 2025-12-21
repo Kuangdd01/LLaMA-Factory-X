@@ -592,46 +592,6 @@ class Gemma3nPlugin(Gemma3Plugin):
         return messages
 
 
-@dataclass
-class HunyuanVLPlugin(BasePlugin):
-    vision_bos_token: str = "<｜hy_place▁holder▁no▁100｜>"
-    vision_eos_token: str = "<｜hy_place▁holder▁no▁101｜>"
-    image_token: str = "<｜hy_place▁holder▁no▁102｜>"
-
-    @override
-    def process_messages(self, messages, images, videos, audios, processor):
-        self._validate_input(processor, images, videos, audios)
-        self._validate_messages(messages, images, videos, audios)
-        if self.expand_mm_tokens:
-            mm_inputs = self._get_mm_inputs(images, videos, audios, processor)
-            image_grid_thw = mm_inputs.get("image_grid_hws", [])
-        else:
-            image_grid_thw = [None] * len(images)
-
-        num_image_tokens = 0
-        image_processor: BaseImageProcessor = getattr(processor, "image_processor")
-        merge_size = image_processor.merge_size
-        messages = deepcopy(messages)
-        for message in messages:
-            content = message["content"]
-            while IMAGE_PLACEHOLDER in content:
-                if self.expand_mm_tokens:
-                    grid_h, grid_w = image_grid_thw[num_image_tokens][-2:]
-                    patch_h = grid_h // merge_size
-                    patch_w = grid_w // merge_size
-                    image_seqlen = patch_h * (patch_w + 1) + 2
-                else:
-                    image_seqlen = 1
-                    content = content.replace(
-                        IMAGE_PLACEHOLDER,
-                        f"{self.vision_bos_token}{self.image_token * image_seqlen}{self.vision_eos_token}",
-                        1,
-                    )
-                num_image_tokens += 1
-
-            message["content"] = content
-
-        return messages
 
 @dataclass
 class InternVLPlugin(BasePlugin):

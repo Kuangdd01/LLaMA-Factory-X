@@ -19,7 +19,8 @@ from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from typing import Optional
 
-from torch.utils.data import StatefulDataLoader, StatefulDistributedSampler
+from torchdata.stateful_dataloader import StatefulDataLoader
+from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 
 from ..utils.batching_queue import BaseBatchingQueue
 from ..utils.logging import get_logger
@@ -132,16 +133,29 @@ class DataLoader:
                     return
 
                 try:
+                    batch = []
                     data = next(self._data_iter)
-                    yield data
+                    # split data into micro batches
+                    for i in range(0, len(data), self.num_micro_batch):
+                        micro_batch = data[i:i+self.num_micro_batch]
+                        if self._collate_fn:
+                            micro_batch = self._collate_fn(micro_batch)
+                        batch.append(micro_batch)
+                    yield batch
                     self.step += 1
                 except StopIteration:
                     if self.step < self._length:
                         # Restart iterator to fill the requested length
                         self._data_iter = iter(self._dataloader)
                         try:
+                            batch = []
                             data = next(self._data_iter)
-                            yield data
+                            for i in range(0, len(data), self.num_micro_batch):
+                                micro_batch = data[i:i+self.num_micro_batch]
+                                if self._collate_fn:
+                                    micro_batch = self._collate_fn(micro_batch)
+                                batch.append(micro_batch)
+                            yield batch
                             self.step += 1
                         except StopIteration:
                             return

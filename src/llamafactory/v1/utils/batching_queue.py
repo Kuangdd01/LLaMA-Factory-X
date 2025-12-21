@@ -150,7 +150,7 @@ class IdentityPacker:
 
 
 class TextBatchingQueue(BaseBatchingQueue):
-    """Batching strategy for text data."""
+    """Batching text queue for text data."""
 
     def __init__(
         self,
