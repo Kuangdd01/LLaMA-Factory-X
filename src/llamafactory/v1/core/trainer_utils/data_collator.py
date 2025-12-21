@@ -59,7 +59,7 @@ class DataCollator:
 
 @dataclass
 class DefaultCollator(DataCollator):
-    """example for now"""
+    """Example for now."""
     processor: "Processor" # processor name -> map to encode_messages function
     template: QwenTemplate = QwenTemplate()
 
@@ -72,3 +72,15 @@ class DefaultCollator(DataCollator):
             features.append(encoded_message)
 
         return super().__call__(features)
+
+
+@dataclass
+class PairwiseCollator(DataCollator):
+    pass
+
+
+@dataclass
+class PackingCollator(DataCollator):
+    pass
+
+

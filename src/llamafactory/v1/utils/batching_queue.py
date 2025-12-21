@@ -1,4 +1,7 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
+# Copyright 2025 Bytedance Ltd. and the LlamaFactory team.
+#
+# This code is inspired by the Bytedance's VeOmni library.
+# https://github.com/ByteDance-Seed/VeOmni/blob/v0.1.4/veomni/data/dynamic_batching.py
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,88 +15,120 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from abc import ABC, abstractmethod
 
-class DynBszBuffer:
-    """A buffer to store samples for dynamic batch size.
-    """
+
+class DynamicBatchSizeBuffer:
+    """A buffer to store samples for dynamic batch size."""
 
     def __init__(self):
-        self._buffer = []
-        self._buffer_sample_lens = []
-        self.del_idxs = []
-        self.cur_idx = 0
-        self.all_token_cnt = 0
+        self._buffer: list[dict[str, any]] = []
+        self._buffer_sample_lengths: list[int] = []
+        self._deleted_indices: set[int] = set()
+        self._current_index: int = 0
+        self._total_token_count: int = 0
 
-    def append(self, item: dict[str, any]):
+    def append(self, item: dict[str, any]) -> None:
         """Append a sample to the buffer.
 
         Args:
-            item: a sample to append to the buffer.
+            item: A sample to append to the buffer.
                 The sample should be a dict with the following keys:
                     - input_ids: torch.Tensor of shape (seq_len, )
                     - attention_mask: torch.Tensor of shape (seq_len, )
         """
         self._buffer.append(item)
-        self._buffer_sample_lens.append(item["attention_mask"].sum())
-        self.all_token_cnt += self._buffer_sample_lens[-1]
+        sample_length = int(item["attention_mask"].sum().item())
+        self._buffer_sample_lengths.append(sample_length)
+        self._total_token_count += sample_length
 
-    def get_samples(self, n_token_per_iter: int, force: bool = True):
-        """Get samples from the buffer.
+    def get_samples(self, max_tokens_per_iteration: int, force: bool = True) -> list[dict[str, any]]:
+        """Get samples from the buffer that fit within the token budget.
 
         Args:
-            n_token_per_iter: the number of tokens to get.
-            force: if True, the first sample will be returned even if it is not full.
+            max_tokens_per_iteration: Maximum number of tokens to retrieve.
+            force: If True, the first available sample will be returned even
+                if it exceeds the token budget.
 
         Returns:
-            samples: a list of samples.
+            A list of samples that fit within the token budget.
+
+        Raises:
+            AssertionError: If no samples are found (should not happen in normal operation).
         """
         cum_seq_len = 0
         samples = []
-        while self.cur_idx < len(self._buffer) and cum_seq_len < n_token_per_iter:
-            seq_len = self._buffer_sample_lens[self.cur_idx]
-            if self.cur_idx not in self.del_idxs and (
-                (force is True and cum_seq_len == 0) or (seq_len <= n_token_per_iter - cum_seq_len)
-            ):
+
+        while self._current_index < len(self._buffer) and cum_seq_len < max_tokens_per_iteration:
+            if self._current_index in self._deleted_indices:
+                self._current_index += 1
+                continue
+
+            seq_len = self._buffer_sample_lengths[self._current_index]
+            remaining_tokens = max_tokens_per_iteration - cum_seq_len
+
+            # Check if we can add this sample
+            can_add = (force and cum_seq_len == 0) or (seq_len <= remaining_tokens)
+
+            if can_add:
                 cum_seq_len += seq_len
-                samples.append(self._buffer[self.cur_idx])
-                self.del_idxs.append(self.cur_idx)
-            self.cur_idx += 1
-        assert len(samples) > 0
+                samples.append(self._buffer[self._current_index])
+                self._deleted_indices.add(self._current_index)
+
+            self._current_index += 1
+
+        assert len(samples) > 0, "No samples found in buffer"
         return samples
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """Return the number of samples in the buffer."""
         return len(self._buffer)
 
-    def flush(self):
-        """ "
-        Flush the buffer.
-        """
-        self.cur_idx = 0
-        self.all_token_cnt -= sum([self._buffer_sample_lens[idx] for idx in self.del_idxs])
-        buffer_len = len(self._buffer)
-        self._buffer = [self._buffer[idx] for idx in range(buffer_len) if idx not in self.del_idxs]
-        self._buffer_sample_lens = [
-            self._buffer_sample_lens[idx] for idx in range(buffer_len) if idx not in self.del_idxs
+    @property
+    def total_token_count(self) -> int:
+        """Return the total number of tokens in the buffer."""
+        return self._total_token_count
+
+    def flush(self) -> None:
+        tokens_to_remove = sum(
+            self._buffer_sample_lengths[idx]
+            for idx in self._deleted_indices
+        )
+        self._total_token_count -= tokens_to_remove
+
+        buffer_length = len(self._buffer)
+        self._buffer = [
+            self._buffer[idx]
+            for idx in range(buffer_length)
+            if idx not in self._deleted_indices
         ]
-        self.del_idxs = []
+        self._buffer_sample_lengths = [
+            self._buffer_sample_lengths[idx]
+            for idx in range(buffer_length)
+            if idx not in self._deleted_indices
+        ]
 
+        self._current_index = 0
+        self._deleted_indices.clear()
 
+class BaseBatchingQueue(ABC):
+    """Base class for batching queue."""
 
-class BaseBatchingQueue:
-    """Base class for batching queue.
-    """
-
+    @abstractmethod
     def is_full_filled(self) -> bool:
-        raise NotImplementedError("should implement `is_full_filled`")
+        raise NotImplementedError("Subclasses must implement `is_full_filled`")
 
-    def put_item(self, item: dict[str, any]):
-        raise NotImplementedError("should implement `put_item`")
+    @abstractmethod
+    def put_item(self, item: dict[str, any]) -> None:
+        raise NotImplementedError("Subclasses must implement `put_item`")
 
-    def get_micro_batch(self, step: int) -> any:
-        raise NotImplementedError("should implement `get_micro_batch` ")
+    @abstractmethod
+    def get_micro_batch(self, step: int) -> list[dict[str, any]]:
+        raise NotImplementedError("Subclasses must implement `get_micro_batch`")
 
+    @abstractmethod
     def empty(self) -> bool:
-        raise NotImplementedError("should implement `empty`")
+        raise NotImplementedError("Subclasses must implement `empty`")
 
 
 class IdentityPacker:
@@ -115,15 +150,7 @@ class IdentityPacker:
 
 
 class TextBatchingQueue(BaseBatchingQueue):
-    """ "
-    Batching strategy for text data.
-
-    Args:
-        token_micro_bsz: the number of tokens to get for each request.
-        buffer_size: the size of the buffer.
-        bsz_warmup_steps: the number of steps to warm up the batch size.
-        bsz_warmup_init_mbtoken: the initial number of tokens to get for each request.
-    """
+    """Batching strategy for text data."""
 
     def __init__(
         self,
@@ -137,8 +164,8 @@ class TextBatchingQueue(BaseBatchingQueue):
         self.token_micro_bsz = token_micro_bsz
         self.bsz_warmup_steps = bsz_warmup_steps
         self.buffer_size = buffer_size  # minimum samples in buffer
-        self.buffer = DynBszBuffer()
-        self.bsz_warmup_init_mbtoken = bsz_warmup_init_mbtoken
+        self.buffer = DynamicBatchSizeBuffer()
+        self.bsz_warmup_init_mbtoken = bsz_warmup_init_mbtoken # training warmup args
         assert self.bsz_warmup_init_mbtoken >= 0
 
         self.packer = IdentityPacker(
@@ -148,7 +175,7 @@ class TextBatchingQueue(BaseBatchingQueue):
         )
 
     def is_full_filled(self) -> bool:
-        return len(self.buffer) >= self.buffer_size and self.buffer.all_token_cnt >= self.token_micro_bsz
+        return len(self.buffer) >= self.buffer_size and self.buffer.total_token_count >= self.token_micro_bsz
 
     def put_item(self, item: dict[str, any]):
         if len(item["input_ids"]) == 1:
@@ -189,7 +216,7 @@ class TextBatchingQueue(BaseBatchingQueue):
         )
         n_iter = int(cur_token_micro_bsz // n_token_per_iter)
         data = []
-        for i in range(n_iter):
+        for _ in range(n_iter):
             samples = self.buffer.get_samples(n_token_per_iter)
             if self.packer:
                 samples = self.packer(samples)  # maybe packed into one sample, but wrapped in list.
@@ -199,3 +226,4 @@ class TextBatchingQueue(BaseBatchingQueue):
 
     def empty(self) -> bool:
         return len(self.buffer) == 0
+

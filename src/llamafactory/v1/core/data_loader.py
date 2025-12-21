@@ -126,7 +126,7 @@ class DataLoader:
 
 
     def origin_batch_data_generator(self):
-            """Standard pass-through generator if do not use batching queue"""
+            """Standard pass-through generator if do not use batching queue."""
             while True:
                 if self._length > 0 and self.step >= self._length:
                     return

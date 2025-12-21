@@ -58,7 +58,7 @@ class QwenTemplate:
             return self.message_template.format(role=role, content=content)
 
     def encode_messages(self, tokenizer, messages: list[dict[str, str]], max_seq_len: int=8192) -> any:
-        """Encode one message"""
+        """Encode one message."""
         input_ids, attention_mask, labels = [], [], []
         for message in messages:
             content_str = self.render_message(message)
@@ -75,6 +75,7 @@ class QwenTemplate:
             else:
                 labels += [-100] * len(content_ids)
         model_inputs = {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+        model_inputs.update({"position_ids": list(range(len(input_ids)))})
         model_inputs = {k: v[-max_seq_len:] for k, v in model_inputs.items()}
         return model_inputs
 
