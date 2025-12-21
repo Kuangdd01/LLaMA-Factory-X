@@ -110,9 +110,10 @@ def configure_quantization(
             check_version("aqlm>=1.1.0", mandatory=True)
             quantization_config["bits"] = 2
 
-        if quant_method == QuantizationMethod.FP8 and is_trainable:
+        if quant_method == QuantizationMethod.FP8:
             quant_config = FineGrainedFP8Config(dequantize=True)
             init_kwargs["quantization_config"] = quant_config
+            init_kwargs["ignore_mismatched_sizes"] = True
 
         quant_bits = quantization_config.get("bits", "?")
         logger.info_rank0(f"Loading {quant_bits}-bit {quant_method.upper()}-quantized model.")

@@ -12,15 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import os
+import socket
 
-from llamafactory.v1.accelerator.interface import DistributedInterface
+
+def find_available_port() -> int:
+    r"""Find an available port on the local machine."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
 
 
-def test_distributed_interface():
-    DistributedInterface()
-    assert DistributedInterface.get_rank() == int(os.getenv("RANK", "0"))
-    assert DistributedInterface.get_world_size() == int(os.getenv("WORLD_SIZE", "1"))
-    assert DistributedInterface.get_local_rank() == int(os.getenv("LOCAL_RANK", "0"))
-    assert DistributedInterface.get_local_world_size() == int(os.getenv("LOCAL_WORLD_SIZE", "1"))
+def is_env_enabled(env_var: str, default: str = "0") -> bool:
+    r"""Check if the environment variable is enabled."""
+    return os.getenv(env_var, default).lower() in ["true", "y", "1"]
+
+
+if __name__ == "__main__":
+    print(find_available_port())
