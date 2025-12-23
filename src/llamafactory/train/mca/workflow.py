@@ -20,6 +20,8 @@ from collections.abc import Sequence
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
+import torch
+
 from ...data import (
     SFTDataCollatorWith4DAttentionMask,
     get_dataset,
@@ -45,6 +47,7 @@ from mcore_adapter.trainer import DPOTrainer as McaDPOTrainer
 from mcore_adapter.trainer import McaTrainer
 from mcore_adapter.trainer.dpo_config import DPOConfig
 from mcore_adapter.training_args import Seq2SeqTrainingArguments as McaSeq2SeqTrainingArguments
+from peft import LoraConfig, get_peft_model
 
 
 if TYPE_CHECKING:
@@ -54,6 +57,40 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+
+def _patch_lora_tuning(model: Any, finetuning_args: FinetuningArguments):
+    """Patching only for mca flow."""
+    try:
+        from mcore_adapter.adapters import apply_megatron_lora, find_all_linear_modules, set_linear_is_expert
+    except ImportError:
+        raise ImportError("Please update mcore_adapter to the latest version for supporting lora tuning.")
+
+    def _setup_lora_training(model, finetuning_args):
+        # here we find TE-type Linear
+        model.enable_input_require_grads()
+        target_modules = find_all_linear_modules(model)
+
+        peft_kwargs = {
+            "r": finetuning_args.lora_rank,
+            "target_modules": target_modules,
+            "lora_alpha": finetuning_args.lora_alpha,
+            "lora_dropout": finetuning_args.lora_dropout,
+        }
+
+        lora_config = LoraConfig(
+            **peft_kwargs,
+        )
+        model = get_peft_model(model, lora_config)
+
+        for param in filter(lambda p: p.requires_grad, model.parameters()):
+            param.data = param.data.to(dtype=torch.float32)
+
+        return model
+
+    apply_megatron_lora()
+    set_linear_is_expert(model[0])  # why only model[0]
+    model.models[0] = _setup_lora_training(model[0], finetuning_args)
 
 
 def _data_collator_wrapper(data_collator: Any):
@@ -104,6 +141,9 @@ def run_pt(
 
     _check_model_support(model_args)
     model = AutoModel.from_pretrained(model_args.model_name_or_path, training_args)
+
+    if finetuning_args.finetuning_type == "lora":
+        _patch_lora_tuning(model, finetuning_args)
 
     from transformers import DataCollatorForSeq2Seq
 
@@ -165,8 +205,11 @@ def run_sft(
     _check_model_support(model_args)
     model = AutoModel.from_pretrained(model_args.model_name_or_path, training_args)
 
+    if finetuning_args.finetuning_type == "lora":
+        _patch_lora_tuning(model, finetuning_args)
+
     # optional freezing for qwen2_vl, qwen2_5_vl
-    if getattr(model.config, "hf_model_type", None) in ["qwen2_vl", "qwen2_5_vl"]:
+    if getattr(model.config, "hf_model_type", None) in ["qwen2_vl", "qwen2_5_vl", "qwen3_vl"]:
         params_to_freeze = []
         if finetuning_args.freeze_vision_tower:
             params_to_freeze.extend(["vision_model.blocks", "vision_model.patch_embed"])
