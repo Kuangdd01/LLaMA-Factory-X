@@ -168,6 +168,10 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             "video_grid_thw": mm_inputs.get("video_grid_thw"),
             "attention_mask": (features["attention_mask"] >= 1).float(),
         }
+        if features["attention_mask"].sum() == 0:
+            features["position_ids"] = torch.zeros((3, *features["input_ids"].shape))
+            features["rope_deltas"] = torch.zeros(features["input_ids"].shape[0])
+            return
         if "mm_token_type_ids" in inspect.signature(self.get_rope_func).parameters:
             image_token_id = getattr(self.model.config, "image_token_id", None)
             video_token_id = getattr(self.model.config, "video_token_id", None)
@@ -220,7 +224,6 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             images_per_subseq = sample_packing.get("packed_images_counts") or ([0] * num_sub_seqs if num_sub_seqs > 1 else None)
             videos_per_subseq = sample_packing.get("packed_videos_counts") or ([0] * num_sub_seqs if num_sub_seqs > 1 else None)
             audios_per_subseq = sample_packing.get("packed_audios_counts") or ([0] * num_sub_seqs if num_sub_seqs > 1 else None)
-
             if num_sub_seqs <= 1:
                 sample_features = {
                     "input_ids": features["input_ids"][sample_idx : sample_idx + 1],
@@ -233,8 +236,8 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
                 all_position_ids.append(sample_features["position_ids"])
                 all_rope_deltas.append(sample_features["rope_deltas"])
             else:
+                # when we do packing, don't need rope_deltas when training.
                 sample_position_ids: list[torch.Tensor] = []
-                sample_rope_deltas: list[torch.Tensor] = []
                 for subseq_idx in range(num_sub_seqs):
                     subseq_start = sequence_boundaries[subseq_idx]
                     subseq_end = sequence_boundaries[subseq_idx + 1]
@@ -255,21 +258,16 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
                     )
                     self._compute_rope_position_ids(subseq_features, mm_inputs_for_subseq)
                     sample_position_ids.append(subseq_features["position_ids"])
-                    sample_rope_deltas.append(subseq_features["rope_deltas"])
-                all_position_ids.append(torch.cat(sample_position_ids, dim=1))
-                all_rope_deltas.append(torch.cat(sample_rope_deltas, dim=1))
+                all_position_ids.append(torch.cat(sample_position_ids, dim=-1))
 
         batch_dim_for_position_ids = 1 if all_position_ids[0].dim() == 3 else 0
-        batch_dim_for_rope_deltas = 1 if all_rope_deltas[0].dim() == 3 else 0
         features["position_ids"] = torch.cat(all_position_ids, dim=batch_dim_for_position_ids)
-        features["rope_deltas"] = torch.cat(all_rope_deltas, dim=batch_dim_for_rope_deltas)
 
         expected_position_ids_shape = (bsz, seq_len) if all_position_ids[0].dim() == 2 else (
             all_position_ids[0].size(0),
             bsz,
             seq_len,
         )
-
         # Check if position_ids shape matches expected shape.
         # for further usage, we should padding to the right when some padding token on the right.
         if features["position_ids"].shape != expected_position_ids_shape:
@@ -277,21 +275,6 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
                 "Merged position_ids shape mismatch: "
                 f"got {features['position_ids'].shape}, expected {expected_position_ids_shape}."
             )
-        expected_rope_deltas_shape = (bsz, seq_len) if all_rope_deltas[0].dim() == 2 else (
-            all_rope_deltas[0].size(0),
-            bsz,
-            seq_len,
-        )
-
-        if features["rope_deltas"].shape != expected_rope_deltas_shape:
-            raise ValueError(
-                "Merged rope_deltas shape mismatch: "
-                f"got {features['rope_deltas'].shape}, expected {expected_rope_deltas_shape}."
-            )
-        if not torch.isfinite(features["position_ids"]).all() or not torch.isfinite(
-            features["rope_deltas"]
-        ).all():
-            raise ValueError("position_ids or rope_deltas contain non-finite values after merge.")
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, "torch.Tensor"]:
         batch_images, batch_videos, batch_audios = [], [], []
@@ -391,6 +374,7 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             else:
                 if is_omni:
                     raise RuntimeError("Omni models are not supported for packed sequences for now.")
+                # may affected by fake_input_ids with left-padding or right-padding.
                 self._compute_rope_position_ids_with_packing(
                     features, mm_inputs, packing_info, batch_imglens, batch_vidlens, batch_audlens
                 )

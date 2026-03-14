@@ -232,6 +232,14 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 else:
                     packed_attention_masks += [1] * pad_length  # more efficient flash_attn
 
+                packed_images_counts.append(0)
+                packed_videos_counts.append(0)
+                packed_audios_counts.append(0)
+                image_subseq_ids.append(0)
+                video_subseq_ids.append(0)
+                audio_subseq_ids.append(0)
+                sequence_boundaries.append(sequence_boundaries[-1] + pad_length)
+
             if len(packed_input_ids) != self.data_args.cutoff_len + 1:
                 raise ValueError("The length of packed example should be identical to the cutoff length.")
 
