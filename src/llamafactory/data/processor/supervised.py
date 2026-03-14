@@ -43,17 +43,6 @@ class PackingParams:
     video_subseq_ids: list[int]
     audio_subseq_ids: list[int]
 
-    def num_sub_seqs(self) -> int:
-        return len(self.sequence_boundaries) - 1
-
-    def subseq_range(self, subseq_idx: int) -> tuple[int, int]:
-        """Return (start, end) token indices for sub-sequence subseq_idx (0-based)."""
-        return (
-            self.sequence_boundaries[subseq_idx],
-            self.sequence_boundaries[subseq_idx + 1],
-        )
-
-
 @dataclass
 class SupervisedDatasetProcessor(DatasetProcessor):
     def _encode_data_example(
@@ -192,7 +181,6 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
         for knapsack in knapsacks:
             packed_input_ids, packed_attention_masks, packed_position_ids, packed_labels = [], [], [], []
             packed_images, packed_videos, packed_audios = [], [], []
-            packed_images_counts, packed_videos_counts, packed_audios_counts = [], [], []
             sequence_boundaries = [0]
             image_subseq_ids: list[int] = []
             video_subseq_ids: list[int] = []
@@ -210,9 +198,6 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 n_img = len(batch_images[index])
                 n_vid = len(batch_videos[index])
                 n_aud = len(batch_audios[index])
-                packed_images_counts.append(n_img)
-                packed_videos_counts.append(n_vid)
-                packed_audios_counts.append(n_aud)
                 sequence_boundaries.append(sequence_boundaries[-1] + len(batch_input_ids[index]))
                 image_subseq_ids.extend([i] * n_img)
                 video_subseq_ids.extend([i] * n_vid)
@@ -232,12 +217,6 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 else:
                     packed_attention_masks += [1] * pad_length  # more efficient flash_attn
 
-                packed_images_counts.append(0)
-                packed_videos_counts.append(0)
-                packed_audios_counts.append(0)
-                image_subseq_ids.append(0)
-                video_subseq_ids.append(0)
-                audio_subseq_ids.append(0)
                 sequence_boundaries.append(sequence_boundaries[-1] + pad_length)
 
             if len(packed_input_ids) != self.data_args.cutoff_len + 1:
@@ -253,9 +232,6 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
             # for mmrope preparation when using packed sequences.
             if self.data_args.neat_packing:
                 model_inputs["packing_params"].append(asdict(packing_params))
-                model_inputs["packed_images_counts"].append(packed_images_counts)
-                model_inputs["packed_videos_counts"].append(packed_videos_counts)
-                model_inputs["packed_audios_counts"].append(packed_audios_counts)
             model_inputs["attention_mask"].append(packed_attention_masks)
             model_inputs["position_ids"].append(packed_position_ids)
             model_inputs["labels"].append(packed_labels)

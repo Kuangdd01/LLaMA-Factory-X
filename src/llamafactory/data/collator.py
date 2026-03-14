@@ -43,11 +43,9 @@ def _slice_mm_inputs_for_sample(
     mm_inputs: dict[str, Any],
     batch_imglens: list[int],
     batch_vidlens: list[int],
-    batch_audlens: list[int],
     batch_idx: int,
-    packed_images_counts: Optional[list[int]] = None,
-    packed_videos_counts: Optional[list[int]] = None,
-    packed_audios_counts: Optional[list[int]] = None,
+    images_per_subseq: Optional[list[int]] = None,
+    videos_per_subseq: Optional[list[int]] = None,
     subseq_idx: Optional[int] = None,
 ) -> dict[str, Any]:
     r"""Slice mm_inputs for one batch sample, optionally for a single sub-sequence when packing.
@@ -60,12 +58,12 @@ def _slice_mm_inputs_for_sample(
     image_end_idx = sum(batch_imglens[: batch_idx + 1])
     video_start_idx = sum(batch_vidlens[:batch_idx])
     video_end_idx = sum(batch_vidlens[: batch_idx + 1])
-    if subseq_idx is not None and packed_images_counts is not None:
-        image_start_idx += sum(packed_images_counts[:subseq_idx])
-        image_end_idx = image_start_idx + packed_images_counts[subseq_idx]
-    if subseq_idx is not None and packed_videos_counts is not None:
-        video_start_idx += sum(packed_videos_counts[:subseq_idx])
-        video_end_idx = video_start_idx + packed_videos_counts[subseq_idx]
+    if subseq_idx is not None and images_per_subseq is not None:
+        image_start_idx += sum(images_per_subseq[:subseq_idx])
+        image_end_idx = image_start_idx + images_per_subseq[subseq_idx]
+    if subseq_idx is not None and videos_per_subseq is not None:
+        video_start_idx += sum(videos_per_subseq[:subseq_idx])
+        video_end_idx = video_start_idx + videos_per_subseq[subseq_idx]
 
     sliced_mm_inputs: dict[str, Any] = {}
     if "image_grid_thw" in mm_inputs:
@@ -205,10 +203,11 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
         self,
         features: dict[str, "torch.Tensor"],
         mm_inputs: dict[str, Any],
-        packing_info: list[dict[str, Any]],
+        packing_params_list: list[dict[str, Any] | None],
         batch_imglens: list[int],
         batch_vidlens: list[int],
         batch_audlens: list[int],
+        has_dummy_image: bool,
     ) -> None:
         r"""Compute position_ids and rope_deltas per sample (or per sub-sequence when packed), then merge and validate."""
         bsz = features["input_ids"].size(0)
@@ -217,16 +216,24 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
         all_rope_deltas: list[torch.Tensor] = []
 
         for sample_idx in range(bsz):
-            sample_packing = packing_info[sample_idx] if sample_idx < len(packing_info) else {}
-            packing_params = sample_packing.get("packing_params") or {}
-            sequence_boundaries = packing_params.get("sequence_boundaries")
+            sample_packing = packing_params_list[sample_idx] if sample_idx < len(packing_params_list) else {}
+            sequence_boundaries = sample_packing.get("sequence_boundaries")
             num_sub_seqs = (len(sequence_boundaries) - 1) if sequence_boundaries and len(sequence_boundaries) > 1 else 1
-            images_per_subseq = sample_packing.get("packed_images_counts") or ([0] * num_sub_seqs if num_sub_seqs > 1 else None)
-            videos_per_subseq = sample_packing.get("packed_videos_counts") or ([0] * num_sub_seqs if num_sub_seqs > 1 else None)
-            audios_per_subseq = sample_packing.get("packed_audios_counts") or ([0] * num_sub_seqs if num_sub_seqs > 1 else None)
+            image_subseq_ids = sample_packing.get("image_subseq_ids") or []
+            video_subseq_ids = sample_packing.get("video_subseq_ids") or []
+            audio_subseq_ids = sample_packing.get("audio_subseq_ids") or []
+            images_per_subseq = (
+                [image_subseq_ids.count(i) for i in range(num_sub_seqs)] if image_subseq_ids and num_sub_seqs > 1 else None
+            )
+            videos_per_subseq = (
+                [video_subseq_ids.count(i) for i in range(num_sub_seqs)] if video_subseq_ids and num_sub_seqs > 1 else None
+            )
+            audios_per_subseq = (
+                [audio_subseq_ids.count(i) for i in range(num_sub_seqs)] if audio_subseq_ids and num_sub_seqs > 1 else None
+            )
             if num_sub_seqs <= 1:
                 sample_features = {
-                    "input_ids": features["input_ids"][sample_idx : sample_idx + 1],
+                    "input_ids": features["input_ids"],
                     "attention_mask": features["attention_mask"][sample_idx : sample_idx + 1],
                 }
                 mm_inputs_for_sample = _slice_mm_inputs_for_sample(
@@ -249,11 +256,9 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
                         mm_inputs,
                         batch_imglens,
                         batch_vidlens,
-                        batch_audlens,
                         sample_idx,
                         images_per_subseq,
                         videos_per_subseq,
-                        audios_per_subseq,
                         subseq_idx,
                     )
                     self._compute_rope_position_ids(subseq_features, mm_inputs_for_subseq)
@@ -270,6 +275,7 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
         )
         # Check if position_ids shape matches expected shape.
         # for further usage, we should padding to the right when some padding token on the right.
+        breakpoint()
         if features["position_ids"].shape != expected_position_ids_shape:
             raise ValueError(
                 "Merged position_ids shape mismatch: "
@@ -279,7 +285,7 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, "torch.Tensor"]:
         batch_images, batch_videos, batch_audios = [], [], []
         batch_imglens, batch_vidlens, batch_audlens, batch_input_ids = [], [], [], []
-        packing_info: list[dict[str, Any]] = []
+        packing_params_list: list[dict[str, Any] | None] = []
         for feature in features:
             images = feature.pop("images", None) or []
             videos = feature.pop("videos", None) or []
@@ -291,14 +297,10 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             batch_vidlens.append(len(videos))
             batch_audlens.append(len(audios))
             batch_input_ids.append(feature["input_ids"])
-            packing_info.append({
-                "packing_params": feature.pop("packing_params", None),
-                "packed_images_counts": feature.pop("packed_images_counts", None),
-                "packed_videos_counts": feature.pop("packed_videos_counts", None),
-                "packed_audios_counts": feature.pop("packed_audios_counts", None),
-            })
+            packing_params_list.append(feature.pop("packing_params", None))
 
         fake_input_ids = []
+        has_dummy_image = False
         if (
             self.template.mm_plugin.image_token is not None and sum(batch_imglens) == 0 and sum(batch_vidlens) == 0
         ):  # avoid process hanging in zero3/fsdp case
@@ -314,6 +316,7 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             fake_input_ids.extend(_fake_input_ids)
             batch_images = fake_images
             batch_imglens[0] = 1
+            has_dummy_image = True
 
         if (
             self.template.mm_plugin.audio_token is not None and sum(batch_audlens) == 0
@@ -367,16 +370,24 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
 
         if self.get_rope_func is not None:
             # for mmrope situation, we should calculate position_ids and rope_deltas per sample.
-            boundaries_list = [(p.get("packing_params") or {}).get("sequence_boundaries") for p in packing_info]
+            boundaries_list = [
+                (p or {}).get("sequence_boundaries") for p in packing_params_list
+            ]
             has_packing = any(b is not None and len(b) > 2 for b in boundaries_list)
+            # When fake image/audio was injected, sequence_boundaries no longer match the tensor; use non-packing path.
             if not has_packing:
                 self._compute_rope_position_ids(features, mm_inputs)
             else:
                 if is_omni:
                     raise RuntimeError("Omni models are not supported for packed sequences for now.")
-                # may affected by fake_input_ids with left-padding or right-padding.
                 self._compute_rope_position_ids_with_packing(
-                    features, mm_inputs, packing_info, batch_imglens, batch_vidlens, batch_audlens
+                    features,
+                    mm_inputs,
+                    packing_params_list,
+                    batch_imglens,
+                    batch_vidlens,
+                    batch_audlens,
+                    has_dummy_image,
                 )
 
             # For transformers compatibility, after https://github.com/huggingface/transformers/issues/39400
