@@ -227,7 +227,6 @@ def _make_packed_features(
     ]
 
 def _get_expected_position_ids(packing_params, get_rope_func, input_ids, attention_mask) -> torch.Tensor:
-    r"""helper function to get expected position ids from packing params and get_rope_func"""
     bound_list = packing_params["sequence_boundaries"]
     input_ids_slices = [input_ids[bound_list[i]:bound_list[i+1]] for i in range(len(bound_list) - 1)]
     attention_mask_slices = [attention_mask[bound_list[i]:bound_list[i+1]] for i in range(len(bound_list) - 1)]
@@ -289,9 +288,9 @@ def test_multimodal_collator_with_packing():
         image_pad_id=tokenizer.convert_tokens_to_ids("<|image_pad|>"),
     )
     expected_position_ids = _get_expected_position_ids(
-        packing_params, 
-        data_collator.get_rope_func, 
-        features[0]["input_ids"], 
+        packing_params,
+        data_collator.get_rope_func,
+        features[0]["input_ids"],
         features[0]["attention_mask"],
     )
     batch_input = data_collator(features) # [3, bsz, seq_len]
