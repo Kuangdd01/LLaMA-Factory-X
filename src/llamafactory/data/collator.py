@@ -390,7 +390,7 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             # for mmrope situation, we should calculate position_ids and rope_deltas per sample.
             # When neat_packing is on, each sample has packing_params; None means no packing for that sample.
             boundaries_list = [
-                p.get("sequence_boundaries") for p in packing_params_list
+                p.get("sequence_boundaries") if p is not None else None for p in packing_params_list
             ]
             has_packing = any(b is not None and len(b) > 2 for b in boundaries_list)
             # When fake image/audio was injected, sequence_boundaries no longer match the tensor; use non-packing path.

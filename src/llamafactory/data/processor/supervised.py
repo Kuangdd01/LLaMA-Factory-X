@@ -204,17 +204,19 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 image_subseq_ids.extend([i] * n_img)
                 video_subseq_ids.extend([i] * n_vid)
                 audio_subseq_ids.extend([i] * n_aud)
-                unpadded_length = len(batch_input_ids[index])
                 if self.data_args.neat_packing:
                     packed_attention_masks += [i + 1] * len(batch_input_ids[index])  # start from 1
                 else:
                     packed_attention_masks += [1] * len(batch_input_ids[index])
 
+            unpadded_length = len(packed_input_ids)
+            right_padding_length = 0
             if len(packed_input_ids) < self.data_args.cutoff_len + 1:  # avoid flash_attn drops attn mask
-                pad_length = self.data_args.cutoff_len - len(packed_input_ids) + 1
+                pad_length = self.data_args.cutoff_len - unpadded_length + 1
                 packed_input_ids += [self.tokenizer.pad_token_id] * pad_length
                 packed_position_ids += [0] * pad_length
                 packed_labels += [IGNORE_INDEX] * pad_length
+                right_padding_length = pad_length
                 if self.data_args.neat_packing:
                     packed_attention_masks += [0] * pad_length
                 else:
@@ -231,7 +233,7 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 video_subseq_ids=video_subseq_ids,
                 audio_subseq_ids=audio_subseq_ids,
                 unpadded_length=unpadded_length,
-                right_padding_length=self.data_args.cutoff_len - len(packed_input_ids) + 1,
+                right_padding_length=right_padding_length,
             )
             model_inputs["input_ids"].append(packed_input_ids)
             # for mmrope preparation when using packed sequences.
