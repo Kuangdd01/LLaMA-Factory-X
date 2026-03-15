@@ -381,7 +381,8 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
 
         features: dict[str, torch.Tensor] = super().__call__(features)
         bsz, seq_len = features["input_ids"].shape[:2]
-        is_omni = getattr(self.model.config, "model_type", None) in [
+        model_type = getattr(self.model.config, "model_type", None) if self.model is not None else None
+        is_omni = model_type in [
             "qwen2_5_omni_thinker",
             "qwen3_omni_moe_thinker",
         ]
