@@ -76,7 +76,6 @@ def load_tokenizer(model_args: "ModelArguments") -> "TokenizerModule":
     """
     init_kwargs = _get_init_kwargs(model_args)
     try:
-        print(f"bugging...{model_args.model_name_or_path}")
         tokenizer = AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
             use_fast=model_args.use_fast_tokenizer,
