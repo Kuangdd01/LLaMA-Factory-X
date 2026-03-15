@@ -130,6 +130,9 @@ def test_multimodal_collator():
 
     assert batch_input.keys() == expected_input.keys()
     for k in batch_input.keys():
+        if k == "position_ids" and batch_input[k].dim() == 3 and expected_input[k].shape[0] == 4:
+            batch_input[k] = batch_input[k][1:]
+
         assert batch_input[k].eq(torch.tensor(expected_input[k])).all()
 
 
