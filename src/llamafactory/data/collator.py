@@ -26,7 +26,7 @@ from peft import PeftModel
 from transformers import DataCollatorForSeq2Seq
 
 from ..extras.constants import AUDIO_PLACEHOLDER, IGNORE_INDEX, IMAGE_PLACEHOLDER, MROPE_MODELS
-from ..extras.packages import is_pillow_available
+from ..extras.packages import is_pillow_available, is_transformers_version_greater_than
 
 
 if is_pillow_available():
@@ -446,15 +446,16 @@ class SFTDataCollatorWith4DAttentionMask(MultiModalDataCollatorForSeq2Seq):
     block_diag_attn: bool = False
     attn_implementation: Literal["eager", "sdpa", "flash_attention_2"] = "eager"
     compute_dtype: "torch.dtype" = torch.float32
-    neat_packing: bool = True # temp for debug...
+    neat_packing: bool = False
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, "torch.Tensor"]:
         features = super().__call__(features)
         if self.block_diag_attn and self.attn_implementation != "flash_attention_2":
             features["attention_mask"] = prepare_4d_attention_mask(features["attention_mask"], self.compute_dtype)
         if self.neat_packing and self.attn_implementation == "flash_attention_2":
-            features["attention_mask"] = None # let transformers handle casual packed mask.
-        # TODO if padding_free we should unpad batch and flatten batch inputs
+            if is_transformers_version_greater_than("4.53.0"):
+            # assert features["input_ids"].shape[0] == 1, "bsz should be 1 for neat packing"
+                features["attention_mask"] = None  # let transformers handle causal packed mask.
 
         for key, value in features.items():  # cast data dtype for paligemma
             if torch.is_tensor(value) and torch.is_floating_point(value):

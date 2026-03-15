@@ -195,7 +195,7 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 packed_images += batch_images[index]
                 packed_videos += batch_videos[index]
                 packed_audios += batch_audios[index]
-                # FIXME if pure text examples are packed, 
+                # FIXME if pure text examples are packed,
                 # we should not count them.
                 n_img = len(batch_images[index])
                 n_vid = len(batch_videos[index])
