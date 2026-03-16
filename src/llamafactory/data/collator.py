@@ -474,7 +474,6 @@ class SFTDataCollatorWith4DAttentionMask(MultiModalDataCollatorForSeq2Seq):
         if self.neat_packing and self.attn_implementation == "flash_attention_2":
             if is_transformers_version_greater_than("4.53.0"):
                 assert features["input_ids"].shape[0] == 1, "bsz should be 1 for neat packing"
-                # TODO figure out why more gpu memory is used when rmpd
                 self._unpad_packed_features(features)
                 features["attention_mask"] = None  # let transformers handle causal packed mask.
 
