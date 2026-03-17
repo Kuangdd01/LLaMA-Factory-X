@@ -152,7 +152,7 @@ def _make_packed_feature(
     video_subseq_ids = packing_params["video_subseq_ids"]
     audio_subseq_ids = packing_params["audio_subseq_ids"]
     unpadded_length = packing_params["unpadded_length"]
-    right_padding_length = packing_params["right_padding_length"]
+    right_padding_length = packing_params["right_padding_length"] # which only preserved in tests
     cutoff_plus_one = sequence_boundaries[-1]
     content_len = unpadded_length
     pad_len = right_padding_length

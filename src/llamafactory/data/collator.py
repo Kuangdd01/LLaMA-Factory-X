@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import inspect
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Optional
@@ -170,6 +171,7 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             features["position_ids"] = torch.zeros((3, *features["input_ids"].shape))
             features["rope_deltas"] = torch.zeros(features["input_ids"].shape[0])
             return
+
         if "mm_token_type_ids" in inspect.signature(self.get_rope_func).parameters:
             image_token_id = getattr(self.model.config, "image_token_id", None)
             video_token_id = getattr(self.model.config, "video_token_id", None)
@@ -180,6 +182,7 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
                 if video_token_id is not None:
                     mm_token_type_ids[features["input_ids"] == video_token_id] = 2
                 rope_index_kwargs["mm_token_type_ids"] = mm_token_type_ids
+
         if "second_per_grid_ts" in mm_inputs:  # for qwen2vl
             rope_index_kwargs["second_per_grid_ts"] = mm_inputs.get("second_per_grid_ts")
         elif "video_second_per_grid" in mm_inputs:  # for qwen2.5 omni
@@ -208,7 +211,6 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
         batch_vidlens: list[int],
         batch_audlens: list[int],
         has_dummy_image: bool,
-        fake_input_ids_len: int,
     ) -> None:
         r"""Compute position_ids and rope_deltas per sample (or per sub-sequence when packed), then merge and validate."""
         bsz = features["input_ids"].size(0)
@@ -218,16 +220,16 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
 
         if has_dummy_image:
             # for [0, seq_len] = [0, unpadded_length + right_padding_length + fake_input_ids_len + collator_padding_length]
-            # fake_input_start_idx = features["input_ids"][0].tolist().index(self.model.config.vision_start_token_id)
-            unpadded_length = packing_params_list[0].get("unpadded_length") or 0
-            right_padding_length = packing_params_list[0].get("right_padding_length") or 0
-            collator_padding_length = seq_len - unpadded_length - right_padding_length - fake_input_ids_len
-            fake_input_padding_length = fake_input_ids_len + collator_padding_length
+            # FIXME: maybe right_padding_length is large, with improper max_cutoff_len
+            unpadded_length = int(features["attention_mask"][0].bool().sum().item())
+            right_padding_length = int((packing_params_list[0] or {}).get("right_padding_length") or 0)
+            fake_input_padding_length = max(0, seq_len - unpadded_length - right_padding_length)
             dummy_image_right_padding_mrope = torch.zeros((3, bsz, fake_input_padding_length))
             dummy_image_right_padding_attention_mask = torch.zeros((bsz, fake_input_padding_length))
             assert self.tokenizer.padding_side == "right", "padding_side should be right when fake image is injected"
+            dummy_mm_inputs = copy.deepcopy(mm_inputs)
 
-        for sample_idx in range(bsz): # when packing shall we deal with bsz > 1???
+        for sample_idx in range(bsz):
             sample_packing = (packing_params_list[sample_idx] or {}) if sample_idx < len(packing_params_list) else {}
             sequence_boundaries = sample_packing.get("sequence_boundaries")
             num_sub_seqs = (len(sequence_boundaries) - 1) if sequence_boundaries and len(sequence_boundaries) > 1 else 1
@@ -239,6 +241,9 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             videos_per_subseq = (
                 [video_subseq_ids.count(i) for i in range(num_sub_seqs)] if video_subseq_ids and num_sub_seqs > 1 else None
             )
+            if has_dummy_image:
+                mm_inputs = {}
+
             if num_sub_seqs <= 1:
                 sample_features = {
                     "input_ids": features["input_ids"],
@@ -274,7 +279,10 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
                 all_position_ids.append(torch.cat(sample_position_ids, dim=-1))
 
         batch_dim_for_position_ids = 1 if all_position_ids[0].dim() == 3 else 0
+
         features["position_ids"] = torch.cat(all_position_ids, dim=batch_dim_for_position_ids)
+        if has_dummy_image:
+            mm_inputs = dummy_mm_inputs
 
         expected_position_ids_shape = (bsz, seq_len) if all_position_ids[0].dim() == 2 else (
             all_position_ids[0].size(0),
@@ -373,6 +381,9 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
                 feature["token_type_ids"] = token_type_ids[i]
 
         features: dict[str, torch.Tensor] = super().__call__(features)
+        if has_dummy_image: # too tricky, need to be refactored
+            features["has_dummy_image"] = True
+
         bsz, seq_len = features["input_ids"].shape[:2]
         model_type = getattr(self.model.config, "model_type", None) if self.model is not None else None
         is_omni = model_type in [
@@ -468,13 +479,15 @@ class SFTDataCollatorWith4DAttentionMask(MultiModalDataCollatorForSeq2Seq):
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, "torch.Tensor"]:
         features = super().__call__(features)
+        has_dummy_image = features.pop("has_dummy_image", False)
         if self.block_diag_attn and self.attn_implementation != "flash_attention_2":
             features["attention_mask"] = prepare_4d_attention_mask(features["attention_mask"], self.compute_dtype)
 
         if self.neat_packing and self.attn_implementation == "flash_attention_2":
             if is_transformers_version_greater_than("4.53.0"):
                 assert features["input_ids"].shape[0] == 1, "bsz should be 1 for neat packing"
-                self._unpad_packed_features(features)
+                if not has_dummy_image:
+                    self._unpad_packed_features(features)
                 features["attention_mask"] = None  # let transformers handle causal packed mask.
 
         for key, value in features.items():  # cast data dtype for paligemma

@@ -42,7 +42,6 @@ class PackingParams:
     image_subseq_ids: list[int]
     video_subseq_ids: list[int]
     audio_subseq_ids: list[int]
-    unpadded_length: int
     right_padding_length: int
 
 @dataclass
@@ -179,8 +178,7 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 valid_num += 1
 
         model_inputs = defaultdict(list)
-        is_multimodal = True if self.template.mm_plugin else False
-        requires_packing_params = is_multimodal and self.data_args.neat_packing
+        requires_packing_params = self.data_args.neat_packing
         knapsacks = greedy_knapsack(lengths, self.data_args.cutoff_len)
         for knapsack in knapsacks:
             packed_input_ids, packed_attention_masks, packed_position_ids, packed_labels = [], [], [], []
@@ -213,18 +211,11 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 else:
                     packed_attention_masks += [1] * len(batch_input_ids[index])
 
-            unpadded_length = len(packed_input_ids)
-            if requires_packing_params:
-                right_padding_length = 0
-
             if len(packed_input_ids) < self.data_args.cutoff_len + 1:  # avoid flash_attn drops attn mask
-                pad_length = self.data_args.cutoff_len - unpadded_length + 1
+                pad_length = self.data_args.cutoff_len - len(packed_input_ids) + 1
                 packed_input_ids += [self.tokenizer.pad_token_id] * pad_length
                 packed_position_ids += [0] * pad_length
                 packed_labels += [IGNORE_INDEX] * pad_length
-                if requires_packing_params:
-                    right_padding_length = pad_length
-
                 if self.data_args.neat_packing:
                     packed_attention_masks += [0] * pad_length
                 else:
@@ -237,17 +228,16 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 raise ValueError("The length of packed example should be identical to the cutoff length.")
 
             model_inputs["input_ids"].append(packed_input_ids)
-            # for mmrope preparation when using packed sequences.
             if requires_packing_params:
                 packing_params = PackingParams(
                     sequence_boundaries=sequence_boundaries,
-                    image_subseq_ids=image_subseq_ids,
-                    video_subseq_ids=video_subseq_ids,
-                    audio_subseq_ids=audio_subseq_ids,
-                    unpadded_length=unpadded_length,
-                    right_padding_length=right_padding_length,
+                    image_subseq_ids=image_subseq_ids or [2**32], # avoid dataset concat error
+                    video_subseq_ids=video_subseq_ids or [2**32],
+                    audio_subseq_ids=audio_subseq_ids or [2**32],
+                    right_padding_length=pad_length,
                 )
                 model_inputs["packing_params"].append(asdict(packing_params))
+
             model_inputs["attention_mask"].append(packed_attention_masks)
             model_inputs["position_ids"].append(packed_position_ids)
             model_inputs["labels"].append(packed_labels)
