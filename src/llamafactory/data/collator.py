@@ -490,7 +490,7 @@ class SFTDataCollatorWith4DAttentionMask(MultiModalDataCollatorForSeq2Seq):
                 assert features["input_ids"].shape[0] == 1, "bsz should be 1 for neat packing"
                 if not has_dummy_image:
                     self._unpad_packed_features(features)
-                features["attention_mask"] = None  # let transformers handle causal packed mask.
+                features["attention_mask"] = None  # let transformers generate cu_seqlens from `prepare_from_posid`
 
         for key, value in features.items():  # cast data dtype for paligemma
             if torch.is_tensor(value) and torch.is_floating_point(value):

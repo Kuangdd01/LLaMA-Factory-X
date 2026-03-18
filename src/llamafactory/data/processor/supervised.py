@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 logger = logging.get_logger(__name__)
 
+MAX_SU_SEQ_IDX = 2**32 # maximum sub-sequence index
 
 @dataclass
 class PackingParams:
@@ -231,9 +232,9 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
             if requires_packing_params:
                 packing_params = PackingParams(
                     sequence_boundaries=sequence_boundaries,
-                    image_subseq_ids=image_subseq_ids or [2**32], # avoid dataset concat error
-                    video_subseq_ids=video_subseq_ids or [2**32],
-                    audio_subseq_ids=audio_subseq_ids or [2**32],
+                    image_subseq_ids=image_subseq_ids or [MAX_SU_SEQ_IDX], # avoid dataset concat error
+                    video_subseq_ids=video_subseq_ids or [MAX_SU_SEQ_IDX],
+                    audio_subseq_ids=audio_subseq_ids or [MAX_SU_SEQ_IDX],
                     right_padding_length=pad_length,
                 )
                 model_inputs["packing_params"].append(asdict(packing_params))
