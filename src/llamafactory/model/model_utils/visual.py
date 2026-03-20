@@ -24,7 +24,6 @@ import transformers.models
 from transformers.activations import ACT2FN
 
 from ...extras import logging
-from ...extras.packages import is_transformers_version_greater_than
 
 
 if TYPE_CHECKING:
@@ -344,9 +343,7 @@ _register_composite_model(
     model_type="qwen2_vl",
     projector_key="visual.merger",
     vision_model_keys=["visual.patch_embed", "visual.blocks"],
-    language_model_keys=["language_model", "lm_head"]
-    if is_transformers_version_greater_than("4.52.0")
-    else ["model", "lm_head"],
+    language_model_keys=["language_model", "lm_head"],
     lora_conflict_keys=["patch_embed"],
 )
 
@@ -355,9 +352,7 @@ _register_composite_model(
     model_type="qwen2_5_vl",
     projector_key="visual.merger",
     vision_model_keys=["visual.patch_embed", "visual.blocks"],
-    language_model_keys=["language_model", "lm_head"]
-    if is_transformers_version_greater_than("4.52.0")
-    else ["model", "lm_head"],
+    language_model_keys=["language_model", "lm_head"],
     lora_conflict_keys=["patch_embed"],
 )
 

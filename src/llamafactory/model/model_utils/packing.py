@@ -43,11 +43,10 @@ import torch
 import torch.nn.functional as F
 
 from ...extras import logging
-from ...extras.packages import is_transformers_version_greater_than
 
 
 if TYPE_CHECKING:
-    from ...hparams import ModelArguments
+    pass
 
 
 logger = logging.get_logger(__name__)
@@ -106,13 +105,3 @@ def get_unpad_data(attention_mask: "torch.Tensor") -> tuple["torch.Tensor", "tor
     max_seqlen_in_batch = seqlens_in_batch.max().item()
     cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.int32), (1, 0))
     return indices, cu_seqlens, max_seqlen_in_batch
-
-
-def configure_packing(model_args: "ModelArguments", is_trainable: bool) -> None:
-    if not is_trainable or not model_args.block_diag_attn:
-        return
-
-    import transformers.modeling_flash_attention_utils
-    if not is_transformers_version_greater_than("4.53.0"):
-        transformers.modeling_flash_attention_utils._get_unpad_data = get_unpad_data
-        logger.info_rank0("Using block diagonal attention for sequence packing without cross-attention when transformers < 4.53.0.")

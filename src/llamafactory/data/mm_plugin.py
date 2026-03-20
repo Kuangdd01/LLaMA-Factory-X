@@ -27,11 +27,12 @@ from typing import TYPE_CHECKING, BinaryIO, Literal, NotRequired, Optional, Type
 import numpy as np
 import torch
 import torchaudio
-from transformers.image_utils import get_image_size, is_valid_image, to_numpy_array
+from transformers.image_utils import get_image_size, is_valid_image, make_flat_list_of_images, to_numpy_array
 from transformers.models.mllama.processing_mllama import (
     convert_sparse_cross_attention_mask_to_dense,
     get_cross_attention_token_mask,
 )
+from transformers.video_utils import make_batched_videos
 from typing_extensions import override
 
 from ..extras.constants import AUDIO_PLACEHOLDER, IGNORE_INDEX, IMAGE_PLACEHOLDER, VIDEO_PLACEHOLDER
@@ -45,13 +46,6 @@ if is_pillow_available():
 
 if is_pyav_available():
     import av
-
-
-if is_transformers_version_greater_than("4.52.0"):
-    from transformers.image_utils import make_flat_list_of_images
-    from transformers.video_utils import make_batched_videos
-else:
-    from transformers.image_utils import make_batched_videos, make_flat_list_of_images
 
 
 if TYPE_CHECKING:
