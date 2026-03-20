@@ -37,16 +37,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from typing import TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
 
 from ...extras import logging
-
-
-if TYPE_CHECKING:
-    pass
 
 
 logger = logging.get_logger(__name__)
