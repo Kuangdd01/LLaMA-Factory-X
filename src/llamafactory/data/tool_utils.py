@@ -467,9 +467,77 @@ class QwenToolUtils(ToolUtils):
 
         return results
 
+class NemoToolUtils(ToolUtils):
+    r"""Nemo tool using template."""
+    @override
+    @staticmethod
+    def tool_formatter(tools: list[dict[str, Any]]) -> str:
+        tool_text = ""
+        for tool in tools:
+            tool = tool.get("function", tool) if tool.get("type") == "function" else tool
+            tool_text += "\n" + json.dumps(tool, ensure_ascii=False)
+
+        return QWEN35_TOOL_PROMPT.format(tool_text=tool_text) # same
+
+    @override
+    @staticmethod
+    def function_formatter(functions: list["FunctionCall"]) -> str:
+        function_texts = []
+        for func in functions:
+            name = func.name
+            arguments = json.loads(func.arguments)
+
+            prompt = "<tool_call>\n"
+            prompt += f"  <name>{name}</name>\n"
+            prompt += "  <parameters>\n"
+
+            for key, value in arguments.items():
+                if not isinstance(value, str):
+                    value = json.dumps(value, ensure_ascii=False)
+                prompt += f"    <{key}>{value}</{key}>\n"
+
+            prompt += "  </parameters>\n"
+            prompt += "</tool_call>"
+
+            function_texts.append(prompt)
+
+        return "\n".join(function_texts)
+
+    @override
+    @staticmethod
+    def tool_extractor(content: str) -> Union[str, list["FunctionCall"]]:
+        results = []
+        regex = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+
+        for tool_call_block in re.findall(regex, content):
+            name_match = re.search(r"<name>\s*(.*?)\s*</name>", tool_call_block, re.DOTALL)
+            if not name_match:
+                continue
+            func_name = name_match.group(1).strip()
+
+            params_match = re.search(r"<parameters>\s*(.*?)\s*</parameters>", tool_call_block, re.DOTALL)
+            args_dict = {}
+
+            if params_match:
+                params_block = params_match.group(1)
+                param_pattern = re.compile(r"<([a-zA-Z0-9_-]+)>\s*(.*?)\s*</\1>", re.DOTALL)
+
+                for key, raw_value in re.findall(param_pattern, params_block):
+                    value = raw_value.strip()
+                    try:
+                        parsed_value = json.loads(value)
+                    except json.JSONDecodeError:
+                        parsed_value = value
+                    args_dict[key] = parsed_value
+
+            results.append(FunctionCall(func_name, json.dumps(args_dict, ensure_ascii=False)))
+
+        return results if results else content
+
 
 class Qwen35ToolUtils(ToolUtils):
     r"""Qwen 3.5 tool using template."""
+
 
     @override
     @staticmethod
