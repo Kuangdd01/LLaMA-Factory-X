@@ -216,7 +216,6 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
         bsz = features["input_ids"].size(0)
         seq_len = features["input_ids"].size(1)
         all_position_ids: list[torch.Tensor] = []
-        all_rope_deltas: list[torch.Tensor] = []
 
         if has_dummy_image:
             # for [0, seq_len] = [0, unpadded_length + right_padding_length + fake_input_ids_len + collator_padding_length]
@@ -244,39 +243,28 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             if has_dummy_image:
                 mm_inputs = {}
 
-            if num_sub_seqs <= 1:
-                sample_features = {
-                    "input_ids": features["input_ids"],
-                    "attention_mask": features["attention_mask"][sample_idx : sample_idx + 1],
+            # when we do packing, don't need rope_deltas when training.
+            sample_position_ids: list[torch.Tensor] = []
+            for subseq_idx in range(num_sub_seqs):
+                subseq_start = sequence_boundaries[subseq_idx]
+                subseq_end = sequence_boundaries[subseq_idx + 1]
+                subseq_features = {
+                    "input_ids": features["input_ids"][sample_idx : sample_idx + 1, subseq_start:subseq_end],
+                    "attention_mask": features["attention_mask"][sample_idx : sample_idx + 1, subseq_start:subseq_end],
                 }
-                mm_inputs_for_sample = _slice_mm_inputs_for_sample(
-                    mm_inputs, batch_imglens, batch_vidlens, sample_idx=sample_idx
+                mm_inputs_for_subseq = _slice_mm_inputs_for_sample(
+                    mm_inputs,
+                    batch_imglens,
+                    batch_vidlens,
+                    batch_idx=sample_idx,
+                    images_per_subseq=images_per_subseq,
+                    videos_per_subseq=videos_per_subseq,
+                    subseq_idx=subseq_idx,
                 )
-                self._compute_rope_position_ids(sample_features, mm_inputs_for_sample)
-                all_position_ids.append(sample_features["position_ids"])
-                all_rope_deltas.append(sample_features["rope_deltas"])
-            else:
-                # when we do packing, don't need rope_deltas when training.
-                sample_position_ids: list[torch.Tensor] = []
-                for subseq_idx in range(num_sub_seqs):
-                    subseq_start = sequence_boundaries[subseq_idx]
-                    subseq_end = sequence_boundaries[subseq_idx + 1]
-                    subseq_features = {
-                        "input_ids": features["input_ids"][sample_idx : sample_idx + 1, subseq_start:subseq_end],
-                        "attention_mask": features["attention_mask"][sample_idx : sample_idx + 1, subseq_start:subseq_end],
-                    }
-                    mm_inputs_for_subseq = _slice_mm_inputs_for_sample(
-                        mm_inputs,
-                        batch_imglens,
-                        batch_vidlens,
-                        sample_idx,
-                        images_per_subseq,
-                        videos_per_subseq,
-                        subseq_idx
-                    )
-                    self._compute_rope_position_ids(subseq_features, mm_inputs_for_subseq)
-                    sample_position_ids.append(subseq_features["position_ids"])
-                all_position_ids.append(torch.cat(sample_position_ids, dim=-1))
+                self._compute_rope_position_ids(subseq_features, mm_inputs_for_subseq)
+                sample_position_ids.append(subseq_features["position_ids"])
+
+            all_position_ids.append(torch.cat(sample_position_ids, dim=-1))
 
         batch_dim_for_position_ids = 1 if all_position_ids[0].dim() == 3 else 0
 
