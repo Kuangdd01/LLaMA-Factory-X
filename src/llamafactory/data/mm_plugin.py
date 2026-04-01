@@ -1501,6 +1501,7 @@ class Qwen2VLPlugin(BasePlugin):
                 frames = video
                 fps_per_video.append(kwargs.get("video_fps", 2.0))
                 durations.append(len(frames) / kwargs.get("video_fps", 2.0))
+                frames_indices.append(list(range(len(frames))))
             else:
                 container = av.open(video, "r")
                 video_stream = next(stream for stream in container.streams if stream.type == "video")
