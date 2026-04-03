@@ -219,6 +219,11 @@ _register_composite_model(
 )
 
 
+_register_composite_model(
+    model_type="gemma4",
+)
+
+
 # copied from qwen2vl
 _register_composite_model(
     model_type="glm4v",
