@@ -790,7 +790,10 @@ class Gemma4Plugin(BasePlugin):
                     "_gemma4_fps_per_video", "_gemma4_frames_indices", "_gemma4_num_audio_soft_tokens"):
             mm_inputs.pop(key, None)
 
-        mm_inputs["mm_token_type_ids"] = processor.create_mm_token_type_ids(batch_ids)
+        mm_inputs["mm_token_type_ids"] = torch.tensor(
+            processor.create_mm_token_type_ids(batch_ids),
+            dtype=torch.long
+        )
 
         return mm_inputs
 
