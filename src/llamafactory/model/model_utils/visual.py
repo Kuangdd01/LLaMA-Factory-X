@@ -48,11 +48,15 @@ class CompositeModel:
     def get_projectors(self, module: "torch.nn.Module") -> list["torch.nn.Module"]:
         mm_projectors: list[torch.nn.Module] = []
         for projector_key in self.projector_keys:
-            mm_projector = module
+            project_module = module
             for key in projector_key.split("."):
-                mm_projector = getattr(mm_projector, key)
+                project_module = getattr(project_module, key, None)
+                if project_module is None: # i,e gemma4 bigger one, there is no embed_audio
+                    logger.warning_rank0(f"Projector key {projector_key} not found in module {module.__class__.__name__}.")
+                    break
 
-            mm_projectors.append(mm_projector)
+            if project_module is not None:
+                mm_projectors.append(project_module)
 
         return mm_projectors
 
@@ -231,7 +235,7 @@ _register_composite_model(
 
 _register_composite_model(
     model_type="gemma4",
-    projector_keys=["embed_vision", "embed_audio"],
+    projector_keys=["model.embed_vision", "model.embed_audio"],
     vision_model_keys=["vision_tower", "audio_tower"],
     lora_conflict_keys=["per_layer_projection_norm"],
 )
