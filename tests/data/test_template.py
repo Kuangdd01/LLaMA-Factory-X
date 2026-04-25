@@ -153,7 +153,7 @@ def test_reasoning_encode_oneturn(cot_messages: bool, enable_thinking: bool):
     _check_tokenization(tokenizer, (prompt_ids, answer_ids), (prompt_str, answer_str))
 
 
-@pytest.mark.runs_on(["cpu", "mps"])
+# @pytest.mark.runs_on(["cpu", "mps"])
 @pytest.mark.parametrize("cot_messages", [True, False])
 @pytest.mark.parametrize("enable_thinking", [True, False, None])
 def test_reasoning_encode_multiturn(cot_messages: bool, enable_thinking: bool):
@@ -174,6 +174,39 @@ def test_reasoning_encode_multiturn(cot_messages: bool, enable_thinking: bool):
         else:
             prompt_str_1 = prompt_str_1 + "<think>\n\n</think>\n\n"
             prompt_str_2 = prompt_str_2 + "<think>\n\n</think>\n\n"
+
+    _check_tokenization(
+        tokenizer,
+        (encoded_pairs[0][0], encoded_pairs[0][1], encoded_pairs[1][0], encoded_pairs[1][1]),
+        (prompt_str_1, answer_str_1, prompt_str_2, answer_str_2),
+    )
+
+
+@pytest.mark.parametrize("enable_thinking", [True, False, None])
+@pytest.mark.parametrize("discarding_history_cot", [True, False])
+def test_reasoning_encode_multiturn_discarding_history_cot(enable_thinking: bool, discarding_history_cot: bool):
+    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
+    data_args = DataArguments(template="qwen3", enable_thinking=enable_thinking)
+    template = get_template_and_fix_tokenizer(tokenizer, data_args)
+    encoded_pairs = template.encode_multiturn(tokenizer, MESSAGES, discarding_history_cot=discarding_history_cot)
+
+    prompt_str_1 = f"<|im_start|>user\n{MESSAGES[0]['content']}<|im_end|>\n<|im_start|>assistant\n"
+    prompt_str_2 = f"<|im_start|>user\n{MESSAGES[2]['content']}<|im_end|>\n<|im_start|>assistant\n"
+
+    if enable_thinking is False:
+        answer_str_1 = f"{MESSAGES[1]['content']}<|im_end|>\n"
+        answer_str_2 = f"{MESSAGES[3]['content']}<|im_end|>\n"
+        if discarding_history_cot:
+            prompt_str_2 = prompt_str_2 + "<think>\n\n</think>\n\n"
+        else:
+            prompt_str_1 = prompt_str_1 + "<think>\n\n</think>\n\n"
+            prompt_str_2 = prompt_str_2 + "<think>\n\n</think>\n\n"
+    else:
+        if discarding_history_cot:
+            answer_str_1 = f"{MESSAGES[1]['content']}<|im_end|>\n"
+        else:
+            answer_str_1 = f"{MESSAGES_WITH_THOUGHT[1]['content']}<|im_end|>\n"
+        answer_str_2 = f"{MESSAGES_WITH_THOUGHT[3]['content']}<|im_end|>\n"
 
     _check_tokenization(
         tokenizer,
