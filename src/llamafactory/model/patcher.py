@@ -419,8 +419,7 @@ def patch_model(
         add_z3_leaf_module(model)
 
         if getattr(model.config, "model_type", None) in ["qwen3_5", "qwen3_5_moe"] and model_args.flash_attn == "fa2":
-            # patch_qwen3_5_forward(model)
-            pass
+            patch_qwen3_5_forward(model)
 
     if not model_args.use_unsloth:
         print_attn_implementation(model.config)
