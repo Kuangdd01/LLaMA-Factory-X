@@ -168,7 +168,6 @@ def patch_qwen3_5_forward(model: "PreTrainedModel") -> None:
             if position_ids is not None
             else None
         )
-        # print(f"【debug】cu_seqlens: {cu_seqlens} on device {cu_seqlens.device}")  # for debugging, can be removed later
 
         # FLA varlen kernels expect [B, T, D] layout, not [B, D, T] like the
         # standard causal-conv1d path that the upstream forward uses.
