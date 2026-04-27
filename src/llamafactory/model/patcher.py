@@ -119,7 +119,7 @@ def patch_qwen3_5_forward(model: "PreTrainedModel") -> None:
                 cache_params=past_key_values,
                 cache_position=cache_position,
                 attention_mask=attention_mask,
-                position_ids=position_ids, # passing position_ids to linear attention
+                position_ids=position_ids,  # passing position_ids to linear attention
             )
         elif self.layer_type == "full_attention":
             hidden_states, _ = self.self_attn(
@@ -163,11 +163,7 @@ def patch_qwen3_5_forward(model: "PreTrainedModel") -> None:
             position_ids = position_ids[0]
 
         # `prepare_fa_kwargs_from_position_ids` would crash on None; guard for safety.
-        cu_seqlens = (
-            prepare_fa_kwargs_from_position_ids(position_ids)[0][0]
-            if position_ids is not None
-            else None
-        )
+        cu_seqlens = prepare_fa_kwargs_from_position_ids(position_ids)[0][0] if position_ids is not None else None
 
         # FLA varlen kernels expect [B, T, D] layout, not [B, D, T] like the
         # standard causal-conv1d path that the upstream forward uses.
@@ -232,6 +228,7 @@ def patch_qwen3_5_forward(model: "PreTrainedModel") -> None:
 
     if model.config.architectures[0] == "Qwen3_5ForConditionalGeneration":
         from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5DecoderLayer, Qwen3_5GatedDeltaNet
+
         Qwen3_5DecoderLayer.forward = _patched_decoder_forward
         Qwen3_5GatedDeltaNet.forward = _patch_gdn_forward
     elif model.config.architectures[0] == "Qwen3_5MoeForConditionalGeneration":
@@ -239,6 +236,7 @@ def patch_qwen3_5_forward(model: "PreTrainedModel") -> None:
             Qwen3_5MoeDecoderLayer,
             Qwen3_5MoeGatedDeltaNet,
         )
+
         Qwen3_5MoeDecoderLayer.forward = _patched_decoder_forward
         Qwen3_5MoeGatedDeltaNet.forward = _patch_gdn_forward
 
