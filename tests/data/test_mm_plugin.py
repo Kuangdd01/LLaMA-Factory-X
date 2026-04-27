@@ -400,7 +400,7 @@ def test_qwen2_omni_plugin():
     _check_plugin(**check_inputs)
 
 
-# @pytest.mark.runs_on(["cpu", "mps"])
+@pytest.mark.runs_on(["cpu", "mps"])
 def test_qwen2_vl_plugin():
     image_seqlen = 4
     tokenizer_module = _load_tokenizer_module(model_name_or_path="Qwen/Qwen2-VL-7B-Instruct")
