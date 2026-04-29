@@ -143,15 +143,9 @@ class PackageAvailability(tuple):
 
 
 def _patched_is_package_available(pkg_name: str, return_version: bool = False):
-    available = _orig_is_package_available(pkg_name)[0]
+    available, version = _orig_is_package_available(pkg_name, return_version=return_version)
 
-    if return_version and available:
-        # Keep transformers' original version resolution behavior
-        _, pkg_version = _orig_is_package_available(pkg_name, return_version=True)
-    else:
-        pkg_version = "N/A"
-
-    return PackageAvailability(available, pkg_version)
+    return PackageAvailability(available, version)
 
 
 if is_transformers_version_greater_than("5.3.0"):
