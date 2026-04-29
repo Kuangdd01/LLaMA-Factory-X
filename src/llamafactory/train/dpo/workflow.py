@@ -17,9 +17,12 @@
 
 from typing import TYPE_CHECKING, Optional
 
+import trl.import_utils
+
 from ...data import PairwiseDataCollatorWithPadding, get_dataset, get_template_and_fix_tokenizer
 from ...extras.constants import IGNORE_INDEX
 from ...extras.misc import calculate_tps
+from ...extras.packages import _is_package_available
 from ...extras.ploting import plot_loss
 from ...hparams import ModelArguments
 from ...model import load_model, load_tokenizer
@@ -30,6 +33,17 @@ if TYPE_CHECKING:
     from transformers import Seq2SeqTrainingArguments, TrainerCallback
 
     from ...hparams import DataArguments, FinetuningArguments
+
+
+# Monkey patch trl.import_utils to use LlamaFactory's package detection logic.
+def _patched_is_package_available(pkg_name: str, return_version: bool = False):
+    available = _is_package_available(pkg_name)
+    if return_version:
+        return available, "N/A"
+    return available
+
+
+trl.import_utils._is_package_available = _patched_is_package_available
 
 
 def run_dpo(
