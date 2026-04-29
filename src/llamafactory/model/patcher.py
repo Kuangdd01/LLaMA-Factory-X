@@ -119,7 +119,7 @@ def patch_qwen3_5_forward(model: "PreTrainedModel") -> None:
                 cache_params=past_key_values,
                 cache_position=cache_position,
                 attention_mask=attention_mask,
-                position_ids=position_ids, # passing position_ids to linear attention
+                position_ids=position_ids,  # passing position_ids to linear attention
             )
         elif self.layer_type == "full_attention":
             hidden_states, _ = self.self_attn(
