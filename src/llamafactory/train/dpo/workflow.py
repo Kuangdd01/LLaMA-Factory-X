@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Optional
 from ...data import PairwiseDataCollatorWithPadding, get_dataset, get_template_and_fix_tokenizer
 from ...extras.constants import IGNORE_INDEX
 from ...extras.misc import calculate_tps
-from ...extras.packages import _is_package_available, is_transformers_version_greater_than
 from ...extras.ploting import plot_loss
 from ...hparams import ModelArguments
 from ...model import load_model, load_tokenizer
@@ -31,34 +30,6 @@ if TYPE_CHECKING:
     from transformers import Seq2SeqTrainingArguments, TrainerCallback
 
     from ...hparams import DataArguments, FinetuningArguments
-
-
-def patch_transformers_package_check(custom_is_available_fn):
-    import transformers.utils.import_utils as import_utils
-
-    _orig_is_package_available = import_utils._is_package_available
-
-    class PackageAvailability(tuple):
-        __slots__ = ()
-
-        def __new__(cls, available: bool, pkg_version: str = "N/A"):
-            return super().__new__(cls, (bool(available), pkg_version))
-
-        def __bool__(self) -> bool:
-            return self[0]
-
-    def _patched_is_package_available(pkg_name: str, return_version: bool = False):
-        available = custom_is_available_fn(pkg_name)
-
-        if return_version and available:
-            # Keep transformers' original version resolution behavior
-            _, pkg_version = _orig_is_package_available(pkg_name, return_version=True)
-        else:
-            pkg_version = "N/A"
-
-        return PackageAvailability(available, pkg_version)
-
-    import_utils._is_package_available = _patched_is_package_available
 
 
 def run_dpo(
@@ -90,9 +61,6 @@ def run_dpo(
             ref_model = create_ref_model(model_args, finetuning_args)
     else:
         ref_model = None
-
-    if is_transformers_version_greater_than("5.3.0"):
-        patch_transformers_package_check(_is_package_available)
 
     if model_args.use_kt:
         from ktransformers.util.globals import GLOBAL_CONFIG  # type: ignore
