@@ -17,7 +17,7 @@
 
 from typing import TYPE_CHECKING, Optional
 
-import trl.import_utils
+import transformers.utils.import_utils
 
 from ...data import PairwiseDataCollatorWithPadding, get_dataset, get_template_and_fix_tokenizer
 from ...extras.constants import IGNORE_INDEX
@@ -43,7 +43,7 @@ def _patched_is_package_available(pkg_name: str, return_version: bool = False):
     return available
 
 
-trl.import_utils._is_package_available = _patched_is_package_available
+transformers.import_utils._is_package_available = _patched_is_package_available
 
 
 def run_dpo(
