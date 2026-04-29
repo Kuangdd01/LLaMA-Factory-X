@@ -43,7 +43,8 @@ def _patched_is_package_available(pkg_name: str, return_version: bool = False):
     return available
 
 
-transformers.import_utils._is_package_available = _patched_is_package_available
+# trl use this function
+transformers.utils.import_utils._is_package_available = _patched_is_package_available
 
 
 def run_dpo(
