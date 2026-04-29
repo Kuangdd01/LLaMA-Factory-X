@@ -35,15 +35,35 @@ if TYPE_CHECKING:
     from ...hparams import DataArguments, FinetuningArguments
 
 
-# Monkey patch trl.import_utils to use LlamaFactory's package detection logic.
+# Monkey patch transformers.utils.import_utils._is_package_available so that
+# trl (which does `from transformers.utils.import_utils import _is_package_available`)
+# and transformers itself both go through LlamaFactory's package detection logic.
+_orig_is_package_available = transformers.utils.import_utils._is_package_available
+
+
+class _AvailabilityResult(tuple):
+    """Tuple-bool hybrid for `_is_package_available` results."""
+
+    __slots__ = ()
+
+    def __new__(cls, available: bool, pkg_version: str = "N/A"):
+        return super().__new__(cls, (bool(available), pkg_version))
+
+    def __bool__(self) -> bool:
+        return self[0]
+
+
 def _patched_is_package_available(pkg_name: str, return_version: bool = False):
     available = _is_package_available(pkg_name)
-    if return_version:
-        return available, "N/A"
-    return available
+    if return_version and available:
+        # Delegate version detection to the original implementation to keep parity
+        # with transformers' distribution-name resolution logic.
+        _, pkg_version = _orig_is_package_available(pkg_name, return_version=True)
+    else:
+        pkg_version = "N/A"
+    return _AvailabilityResult(available, pkg_version)
 
 
-# trl use this function
 transformers.utils.import_utils._is_package_available = _patched_is_package_available
 
 
