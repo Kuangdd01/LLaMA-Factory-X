@@ -165,8 +165,12 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             "video_grid_thw": mm_inputs.get("video_grid_thw"),
             "attention_mask": (features["attention_mask"] >= 1).float(),
         }
-        if features["attention_mask"].sum() == 0:
-            features["position_ids"] = torch.zeros((3, *features["input_ids"].shape))
+        if features["attention_mask"].sum() == 0:  # for dummy image
+            seq_len = features["input_ids"].shape[-1]
+            # to avoid continual cuseqlens breaking varlen attention
+            features["position_ids"] = (
+                torch.arange(seq_len).view(1, 1, seq_len).expand(3, *features["input_ids"].shape).contiguous()
+            )
             features["rope_deltas"] = torch.zeros(features["input_ids"].shape[0])
             return
 
@@ -280,6 +284,7 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
                     )
                     self._compute_rope_position_ids(subseq_features, mm_inputs_for_subseq)
                     sample_position_ids.append(subseq_features["position_ids"])
+
                 all_position_ids.append(torch.cat(sample_position_ids, dim=-1))
 
         batch_dim_for_position_ids = 1 if all_position_ids[0].dim() == 3 else 0
@@ -418,14 +423,14 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             boundaries_list = [p.get("sequence_boundaries") if p is not None else None for p in packing_params_list]
             has_packing = any(b is not None and len(b) > 2 for b in boundaries_list)
             if has_dummy_image and has_packing:
-                # FIXME: too tricky, need to be refactored
+                # FIXME: too tricky, need to be refactored @kuangdd
                 features["has_dummy_image"] = True
 
             # When fake image/audio was injected, sequence_boundaries no longer match the tensor; use non-packing path.
             if not has_packing:
                 self._compute_rope_position_ids(features, mm_inputs)
             else:
-                if is_omni:
+                if is_omni:  # TODO: support omni models for packed sequences @kuangdd
                     raise RuntimeError("Omni models are not supported for packed sequences for now.")
 
                 self._compute_rope_position_ids_with_packing(
