@@ -165,10 +165,8 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             "video_grid_thw": mm_inputs.get("video_grid_thw"),
             "attention_mask": (features["attention_mask"] >= 1).float(),
         }
-        if features["attention_mask"].sum() == 0:  # for dummy image
+        if features["attention_mask"].sum() == 0:  # for pad tokens
             seq_len = features["input_ids"].shape[-1]
-            # avoid continual cuseqlens breaking varlen attention
-            # https://github.com/hiyouga/LlamaFactory/issues/10452
             features["position_ids"] = (
                 torch.arange(seq_len).view(1, 1, seq_len).expand(3, *features["input_ids"].shape).contiguous()
             )
@@ -225,7 +223,13 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             unpadded_length = int(features["attention_mask"][0].bool().sum().item())
             right_padding_length = int((packing_params_list[0] or {}).get("right_padding_length") or 0)
             fake_input_padding_length = max(0, seq_len - unpadded_length - right_padding_length)
-            dummy_image_right_padding_mrope = torch.zeros((3, bsz, fake_input_padding_length))
+            # avoid continual cuseqlens breaking varlen attention @kuangdd
+            # https://github.com/hiyouga/LlamaFactory/issues/10452
+            dummy_image_right_padding_mrope = (
+                torch.arange(fake_input_padding_length)
+                .view(1, 1, fake_input_padding_length)
+                .expand(3, bsz, fake_input_padding_length)
+            )
             dummy_image_right_padding_attention_mask = torch.zeros((bsz, fake_input_padding_length))
             assert self.tokenizer.padding_side == "right", "padding_side should be right when fake image is injected"
             dummy_mm_inputs = copy.deepcopy(mm_inputs)
