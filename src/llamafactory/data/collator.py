@@ -167,7 +167,8 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
         }
         if features["attention_mask"].sum() == 0:  # for dummy image
             seq_len = features["input_ids"].shape[-1]
-            # to avoid continual cuseqlens breaking varlen attention
+            # avoid continual cuseqlens breaking varlen attention
+            # https://github.com/hiyouga/LlamaFactory/issues/10452
             features["position_ids"] = (
                 torch.arange(seq_len).view(1, 1, seq_len).expand(3, *features["input_ids"].shape).contiguous()
             )
